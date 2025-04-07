@@ -1,0 +1,24 @@
+name: 'Sync from Upstream'
+description: 'Sync latest commits from upstream repository'
+
+inputs:
+  github_token:
+    description: 'GitHub token for authentication'
+    required: true
+  upstream_repo:
+    description: 'Upstream repository to sync from'
+    required: true
+
+runs:
+  using: 'composite'
+
+  steps:
+    - name: Checkout the Action Repository
+      uses: actions/checkout@v4
+      with:
+        repository: YoYoGames/upstream-sync
+        path: ./
+        token: ${{ inputs.github_token }}
+    - name: Run Sync Script
+      run: ./sync.sh "${{ inputs.upstream_repo }}" "${{ inputs.github_token }}"
+      shell: bash
