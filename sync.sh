@@ -1,28 +1,19 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# Usage: ./merge_upstream.sh <upstream_repo>
-# Example: ./merge_upstream.sh YoYoGames/GameMaker-Manual
-
 UPSTREAM_REPO="${1:-${UPSTREAM_REPO:-}}"
 GH_TOKEN="${GH_TOKEN:-}"
 
 if [[ -z "$UPSTREAM_REPO" || -z "$GH_TOKEN" ]]; then
-  echo "Usage: GH_TOKEN=... ./merge_upstream.sh YoYoGames/GameMaker-Manual"
+  echo "Usage: GH_TOKEN=... ./sync_all_branches.sh YoYoGames/GameMaker-Manual"
   exit 1
 fi
 
-# Configure Git user
+# Git identity
 git config --global user.name "github-actions"
 git config --global user.email "github-actions@users.noreply.github.com"
 
-# Ensure we're in a git repo
-if ! git rev-parse --is-inside-work-tree >/dev/null 2>&1; then
-  echo "Not inside a git repository."
-  exit 1
-fi
-
-# Add upstream remote if not already added
+# Add upstream remote if not present
 if ! git remote | grep -q "^upstream$"; then
   echo "Adding upstream remote..."
   git remote add upstream "https://x-access-token:${GH_TOKEN}@github.com/${UPSTREAM_REPO}.git"
@@ -31,14 +22,40 @@ fi
 echo "Fetching upstream..."
 git fetch upstream
 
-echo "Merging upstream/develop with 'ours' strategy..."
-if ! git merge -X ours upstream/develop; then
-  echo "Merge conflict detected. Attempting to resolve..."
-  git diff --name-only --diff-filter=U | xargs git rm -f || true
-  git commit -am "Resolved merge conflicts using ours strategy"
-fi
+# Get local branches that also exist upstream
+common_branches=$(git branch -r | grep 'origin/' | sed 's|origin/||' | while read -r branch; do
+  if git ls-remote --exit-code --heads upstream "$branch" &>/dev/null; then
+    echo "$branch"
+  fi
+done)
 
-echo "Pushing changes..."
-git push origin HEAD
+for branch in $common_branches; do
+  echo "====== Syncing branch: $branch ======"
 
-echo "Merge and push completed successfully."
+  # Check out the branch
+  git checkout "$branch"
+
+  # Merge from upstream
+  if git merge -X ours --allow-unrelated-histories "upstream/$branch" -m "Merge upstream/$branch with 'ours' strategy"; then
+    echo "Merge successful on $branch"
+  else
+    echo "Merge conflict on $branch, trying auto-resolution..."
+    UNMERGED_FILES=$(git diff --name-only --diff-filter=U)
+    if [[ -n "$UNMERGED_FILES" ]]; then
+      echo "$UNMERGED_FILES" | xargs git rm -f
+      git commit -am "Auto-resolved conflicts in $branch using ours strategy"
+    fi
+  fi
+
+  # Only push if there are actual changes
+  if [[ -n "$(git status --porcelain)" ]]; then
+    echo "Pushing updates to origin/$branch"
+    git push origin "$branch"
+  else
+    echo "No changes to push on $branch"
+  fi
+
+  echo ""
+done
+
+echo "✅ All branches synced with upstream."
