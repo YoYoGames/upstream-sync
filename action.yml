@@ -21,6 +21,6 @@ runs:
         token: ${{ inputs.github_token }}
     - name: Run Sync Script
       env:
-        GITHUB_TOKEN: ${{ inputs.github_token }}
+        GH_TOKEN: ${{ inputs.github_token }}
       run: ./sync.sh "${{ inputs.upstream_repo }}"
       shell: bash
