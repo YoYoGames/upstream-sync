@@ -1,48 +1,44 @@
-#!/bin/bash
-set -ex
+#!/usr/bin/env bash
+set -euo pipefail
 
-UPSTREAM_REPO="$1"
-GH_TOKEN="$2"
+# Usage: ./merge_upstream.sh <upstream_repo>
+# Example: ./merge_upstream.sh YoYoGames/GameMaker-Manual
+
+UPSTREAM_REPO="${1:-${UPSTREAM_REPO:-}}"
+GH_TOKEN="${GH_TOKEN:-}"
 
 if [[ -z "$UPSTREAM_REPO" || -z "$GH_TOKEN" ]]; then
-    echo "Usage: sync_upstream.sh <upstream_repo> <github_token>"
-    exit 1
+  echo "Usage: GH_TOKEN=... ./merge_upstream.sh YoYoGames/GameMaker-Manual"
+  exit 1
 fi
 
-echo "Configuring Git user..."
-git config --global user.name "ksuchitra532"
-git config --global user.email "ksuchitra532@gmail.com"
+# Configure Git user
+git config --global user.name "github-actions"
+git config --global user.email "github-actions@users.noreply.github.com"
 
-echo "Checking Git version..."
-git --version
+# Ensure we're in a git repo
+if ! git rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+  echo "Not inside a git repository."
+  exit 1
+fi
 
-echo "Adding upstream remote and fetching all branches..."
-git remote add upstream "https://x-access-token:${GH_TOKEN}@github.com/${UPSTREAM_REPO}.git"
-git fetch upstream --tags
+# Add upstream remote if not already added
+if ! git remote | grep -q "^upstream$"; then
+  echo "Adding upstream remote..."
+  git remote add upstream "https://x-access-token:${GH_TOKEN}@github.com/${UPSTREAM_REPO}.git"
+fi
 
-echo "Merging upstream changes for all branches..."
-for branch in $(git branch -r | grep 'upstream/' | grep -v 'HEAD' | sed 's/upstream\///'); do
-    echo "Syncing branch: $branch"
-    
-    if ! git show-ref --verify --quiet refs/heads/$branch; then
-        git checkout -b $branch upstream/$branch
-    else
-        git checkout $branch
-        git fetch upstream $branch
-        git pull --rebase upstream $branch || {
-            echo "Merge conflict or non-fast-forward merge for branch $branch"
-            exit 1
-        }
-    fi
+echo "Fetching upstream..."
+git fetch upstream
 
-    LOCAL_SHA=$(git rev-parse HEAD)
-    REMOTE_SHA=$(git ls-remote "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" refs/heads/$branch | awk '{print $1}')
+echo "Merging upstream/develop with 'ours' strategy..."
+if ! git merge -X ours upstream/develop; then
+  echo "Merge conflict detected. Attempting to resolve..."
+  git diff --name-only --diff-filter=U | xargs git rm -f || true
+  git commit -am "Resolved merge conflicts using ours strategy"
+fi
 
-    if [[ "$LOCAL_SHA" == "$REMOTE_SHA" ]]; then
-        echo "No changes to push for branch $branch, skipping."
-        continue
-    fi
+echo "Pushing changes..."
+git push origin HEAD
 
-    echo "Pushing updates to origin for branch $branch..."
-    git push --force "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" $branch
-done
+echo "Merge and push completed successfully."
